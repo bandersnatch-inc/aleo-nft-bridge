@@ -95,20 +95,23 @@ async def handle_active_mint_request(request, cur_height):
                 "record": {'Value': {'S': record}},
             }
         )
-
-        await asyncio.gather(
-            make_credit_transfer(
-                request_id,
-                recipient_private_key,
-                amount,
-                record
-            ),
-            make_leos_mint(
-                request_id,
-                user_address,
-                leo_amount
-            )
+        await make_split(
+            
         )
+        
+        await make_credit_transfer(
+            request_id,
+            recipient_private_key,
+            amount,
+            record
+        )
+
+        await make_leos_mint(
+            request_id,
+            user_address,
+            leo_amount
+        )
+
     except Exception as e:
         print(e)
         del request_in_progress[request_id]
