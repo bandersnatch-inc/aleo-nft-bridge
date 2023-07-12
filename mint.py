@@ -17,7 +17,7 @@ from project_utils import record_to_amount, format_error
 
 
 MINT_TOTAL_FEE = (
-    env.MINT_LEO_FEE + env.JOIN_CREDITS_FEE + env.TRANSFER_CREDITS_FEE
+    env.MINT_LEOS_FEE + env.JOIN_CREDITS_FEE + env.TRANSFER_CREDITS_FEE
 )
 
 
@@ -131,7 +131,7 @@ async def handle_active_mint_request(request, cur_height):
             await asyncio.sleep(15)
         scan_mint_output = await make_scan_mint(
             request_id,
-            transfer_credits_output["tx_id"],
+            mint_leos_output["tx_id"],
             scan_mint_output,
         )
         scan_former_output = await make_scan_former(
@@ -142,7 +142,7 @@ async def handle_active_mint_request(request, cur_height):
         join_output = await make_join(
             request_id,
             scan_former_output["payment_record"],
-            scan_mint_output["fee_record_output"],
+            scan_mint_output["fee_output_record"],
             scan_former_output["fee_record"],
             join_output,
         )

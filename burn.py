@@ -15,7 +15,7 @@ from project_utils import format_error, leos_record_to_amount
 
 
 BURN_TOTAL_FEE = (
-    env.TRANSFER_LEO_FEE + 2 * env.TRANSFER_CREDITS_FEE + env.BURN_LEOS_FEE
+    env.TRANSFER_LEOS_FEE + 2 * env.TRANSFER_CREDITS_FEE + env.BURN_LEOS_FEE
 )
 
 
@@ -48,6 +48,7 @@ async def burn_scan_records(request, cur_height):
 
 async def handle_active_burn_request(request, cur_height):
     request_id = request["request_id"]
+    recipient_address = request["recipient_address"]
     recipient_view_key = request["recipient_view_key"]
     recipient_private_key = request["recipient_private_key"]
     user_address = request["user_address"]
@@ -74,7 +75,7 @@ async def handle_active_burn_request(request, cur_height):
         has_worked = not bool(transfer_credits_fees_output)
         transfer_credits_fees_output = await make_transfer_credits_fees(
             request_id,
-            recipient_private_key,
+            recipient_address,
             scan_former_output["payment_record"],
             scan_former_output["fee_record"],
             transfer_credits_fees_output,
@@ -93,7 +94,7 @@ async def handle_active_burn_request(request, cur_height):
         transfer_leos_output = await make_transfer_leos(
             request_id,
             recipient_private_key,
-            scan_leos_output["received_output"],
+            scan_leos_output["received_record"],
             scan_transfer_credits_fees_output["transfer_output_record"],
             scan_leos_output["received_amount"],
             transfer_leos_output,
@@ -209,7 +210,7 @@ async def make_scan_former(
 
 async def make_transfer_credits_fees(
     request_id,
-    recipient_private_key,
+    recipient_address,
     amount_record,
     fee_record,
     transfer_credits_fees_output,
@@ -219,8 +220,8 @@ async def make_transfer_credits_fees(
     try:
         tx_id = await transfer_credits(
             env.MINT_ACCOUNT_PRIVATE_KEY,
-            recipient_private_key,
-            env.TRANSFER_LEO_FEE,
+            recipient_address,
+            env.TRANSFER_LEOS_FEE,
             amount_record,
             fee_record,
         )
@@ -336,7 +337,7 @@ async def make_scan_transfer_leos(
         scan_transfer_leos_output = {
             "leos_record": all_records[
                 f"{env.ALEO_STORE_PROGRAM_ID}/transfer_leos"
-            ][0],
+            ][1],
         }
         await dynamodb_update(
             env.ALEO_BURN_REQUESTS_TABLE,
@@ -367,7 +368,6 @@ async def make_transfer(
         tx_id = await transfer_credits(
             env.MINT_ACCOUNT_PRIVATE_KEY,
             user_address,
-            env.TRANSFER_LEO_FEE,
             received_amount - BURN_TOTAL_FEE,
             amount_record,
             fee_record,
@@ -437,10 +437,9 @@ async def make_burn_leos(
             env.MINT_ACCOUNT_PRIVATE_KEY,
             leo_record,
             received_amount,
-            env.MINT_ACCOUNT_ADDRESS,
             fee_record,
         )
-        burn_leos_output = {"tx_id": tx_id}
+        burn_leos_output = {"tx_id": tx_id, "burned_leos": received_amount}
         await dynamodb_update(
             env.ALEO_BURN_REQUESTS_TABLE,
             {"request_id": request_id},

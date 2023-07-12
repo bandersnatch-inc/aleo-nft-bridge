@@ -16,8 +16,6 @@ import env
 import traceback
 from project_utils import format_error
 
-rec = True
-
 
 def merge_requests(burn_requests, mint_requests):
     burn_requests = [
@@ -42,8 +40,14 @@ def merge_requests(burn_requests, mint_requests):
     return requests
 
 
+in_progress = False
+
+
 async def sync():
-    rec = not rec
+    global in_progress
+    if in_progress:
+        return
+    in_progress = True
     try:
         cur_height = await get_height()
         await create_accounts_if_needed()
@@ -51,7 +55,7 @@ async def sync():
             get_mint_requests(cur_height),
             get_burn_requests(cur_height),
         )
-        asyncio.gather(
+        await asyncio.gather(
             asyncio.gather(
                 *[
                     mint_scan_records(request, cur_height)
@@ -73,7 +77,7 @@ async def sync():
         burn_requests = [
             burn_request
             for burn_request in burn_requests
-            if burn_request.get("transfer_leos_output") is not None
+            if burn_request.get("scan_leos_output") is not None
         ]
         requests = merge_requests(burn_requests, mint_requests)
         for request in requests:
@@ -84,8 +88,9 @@ async def sync():
                     await handle_active_burn_request(request, cur_height)
             except Exception as e:
                 print(format_error(e))
-
+        in_progress = False
     except Exception as e:
+        in_progress = False
         print(traceback.format_exc())
 
 

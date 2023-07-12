@@ -4,7 +4,7 @@ import env
 from http_utils import get_request
 import json
 
-from aws_utils import dynamodb_scan, dynamodb_delete
+from aws_utils import dynamodb_scan, dynamodb_delete, dynamodb_update
 import asyncio
 from project_utils import utc_now_ms, ascync_run, record_to_amount
 
@@ -195,7 +195,11 @@ async def get_transaction(tx_id):
 
 async def get_transaction_outputs(tx_id, view_key):
     transaction = await get_transaction(tx_id)
-    transitions = transaction["execution"]["transitions"]
+    fee = transaction.get("fee")
+
+    transitions = transaction["execution"]["transitions"] + (
+        [transaction["fee"]["transition"]] if fee else []
+    )
     outputs = {}
     for transition in transitions:
         transition_id = f'{transition["program"]}/{transition["function"]}'
@@ -256,9 +260,10 @@ async def get_treasury_records():
 async def push_treasury_records(records):
     await asyncio.gather(
         *[
-            dynamodb_delete(
+            dynamodb_update(
                 env.ALEO_TREASURY_RECORDS_TABLE,
                 {"record_id": record},
+                {"used_already": False},
             )
             for record in records
         ]
