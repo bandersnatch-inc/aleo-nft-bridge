@@ -37,6 +37,7 @@ jobs:
         echo AWS_REGION=${{ secrets.AWS_REGION }} >> .env.local
         echo MINT_ACCOUNT_PRIVATE_KEY=${{ secrets.MINT_ACCOUNT_PRIVATE_KEY }} >> .env.local
         echo MINT_ACCOUNT_VIEW_KEY=${{ secrets.MINT_ACCOUNT_VIEW_KEY }} >> .env.local
+        echo CARGO_BIN_DIR_PATH=${{ secrets.CARGO_BIN_DIR_PATH }} >> .env.local
 
     - name: Run production server
       run: python3 main.py & sleep 1s

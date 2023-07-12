@@ -10,7 +10,9 @@ from project_utils import utc_now_ms, ascync_run, record_to_amount
 
 
 async def create_account():
-    aleo_account_new_stdout = await ascync_run(["snarkos", "account", "new"])
+    aleo_account_new_stdout = await ascync_run(
+        [f"{env.CARGO_BIN_DIR_PATH}snarkos", "account", "new"]
+    )
 
     stdout_lines = aleo_account_new_stdout.split("\n")
     private_key = stdout_lines[1].split(" ")[-1]
@@ -38,7 +40,7 @@ async def scan_records(
 
     stdout = await ascync_run(
         [
-            "snarkos",
+            f"{env.CARGO_BIN_DIR_PATH}snarkos",
             "developer",
             "scan",
             "--endpoint",
@@ -63,7 +65,7 @@ async def transfer_credits(
     record = f'"{record}"'
     stdout = await ascync_run(
         [
-            "snarkos",
+            f"{env.CARGO_BIN_DIR_PATH}snarkos",
             "developer",
             "execute",
             env.ALEO_CREDITS_PROGRAM_ID,
@@ -96,7 +98,7 @@ async def mint_leos(
     fee_record = f'"{fee_record}"'
     stdout = await ascync_run(
         [
-            "snarkos",
+            f"{env.CARGO_BIN_DIR_PATH}snarkos",
             "developer",
             "execute",
             env.ALEO_STORE_PROGRAM_ID,
@@ -130,7 +132,7 @@ async def split_credit(
     record = f'"{record}"'
     stdout = await ascync_run(
         [
-            "snarkos",
+            f"{env.CARGO_BIN_DIR_PATH}snarkos",
             "developer",
             "execute",
             env.ALEO_CREDITS_PROGRAM_ID,
@@ -163,7 +165,7 @@ async def join_credits(
     fee_record = f'"{fee_record}"'
     stdout = await ascync_run(
         [
-            "snarkos",
+            f"{env.CARGO_BIN_DIR_PATH}snarkos",
             "developer",
             "execute",
             env.ALEO_CREDITS_PROGRAM_ID,
@@ -214,7 +216,7 @@ async def get_transaction_outputs(tx_id, view_key):
 async def decrypt_record(record, view_key):
     stdout = await ascync_run(
         [
-            "snarkos",
+            f"{env.CARGO_BIN_DIR_PATH}snarkos",
             "developer",
             "decrypt",
             "--ciphertext",
@@ -283,7 +285,7 @@ async def transfer_leos(
     amount = f"{amount}u64"
     stdout = await ascync_run(
         [
-            "snarkos",
+            f"{env.CARGO_BIN_DIR_PATH}snarkos",
             "developer",
             "execute",
             env.ALEO_STORE_PROGRAM_ID,
@@ -321,7 +323,7 @@ async def burn_leos(
     amount = f"{amount}u64"
     stdout = await ascync_run(
         [
-            "snarkos",
+            f"{env.CARGO_BIN_DIR_PATH}snarkos",
             "developer",
             "execute",
             env.ALEO_STORE_PROGRAM_ID,
