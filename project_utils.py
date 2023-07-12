@@ -20,12 +20,16 @@ async def ascync_run(cmd):
     stdout = stdout.decode()
     stderr = stderr.decode()
 
+    print()
+    print("Executing:")
     print(colored(full_cmd, "blue"))
-    print(colored(stdout, "green"))
-    print(colored(stderr, "red"))
 
-    if stderr:
-        raise Exception(stderr)
+    print("STDOUT:")
+    print(colored(stdout, "green"))
+    print("STDERR:")
+    print(colored(stderr, "red"))
+    print()
+
     return stdout
 
 
