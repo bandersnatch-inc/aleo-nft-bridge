@@ -1,0 +1,67 @@
+# This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
+
+name: Build and test
+
+on:
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: [3.9]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        
+#    - name: Install dependencies
+#      run: |
+#        python -m pip install --upgrade pip
+#        pip install ruff pytest
+#        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    - name: Setting credentials
+      run: |
+        touch .env.local
+        echo AWS_ACCESS_ID=${{ secrets.AWS_ACCESS_ID }} >> .env.local
+        echo AWS_SECRET_KEY=${{ secrets.AWS_SECRET_KEY }} >> .env.local
+        echo AWS_REGION=${{ secrets.AWS_REGION }} >> .env.local
+        echo MINT_ACCOUNT_PRIVATE_KEY=${{ secrets.MINT_ACCOUNT_PRIVATE_KEY }} >> .env.local
+        echo MINT_ACCOUNT_VIEW_KEY=${{ secrets.MINT_ACCOUNT_VIEW_KEY }} >> .env.local
+
+    - name: Run production server
+      run: python3 main.py & sleep 1s
+
+    - name: Generate deployment package
+      run: |
+        mkdir builds
+        zip -r --symlinks ${{ github.event.pull_request.head.sha }}.zip . -x '*.git*' 'builds'
+
+    - name: Create build directory
+      uses: appleboy/ssh-action@v0.1.10
+      with:
+        host: ${{ secrets.PRODUCTION_SERVER_HOST }}
+        username: ${{ secrets.PRODUCTION_SERVER_USER }}
+        password: ${{ secrets.PRODUCTION_SERVER_PASS }}
+        port: 22
+        script:
+          mkdir -p ${{ secrets.PRODUCTION_SERVER_PROJECT_DIR }}/builds
+
+    - name: Upload build to server
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.PRODUCTION_SERVER_HOST }}
+        username: ${{ secrets.PRODUCTION_SERVER_USER }}
+        password: ${{ secrets.PRODUCTION_SERVER_PASS }}
+        port: 22
+        source: ${{ github.event.pull_request.head.sha }}.zip
+        target: ${{ secrets.PRODUCTION_SERVER_PROJECT_DIR }}/builds

@@ -1,7 +1,7 @@
 import aioboto3
 from boto3.dynamodb.conditions import Attr
 import env
-
+import boto3
 
 aioboto3_session = aioboto3.Session()
 aws_credentials = {
@@ -15,15 +15,30 @@ async def dynamodb_get(tablename, key_dic):
     async with aioboto3_session.client(
         "dynamodb", **aws_credentials
     ) as dynamodb_client:
-        return await dynamodb_client.get_item(TableName=tablename, Key=key_dic)
+        return ddb_to_py(
+            await dynamodb_client.get_item(
+                TableName=tablename, Key=py_to_ddb(key_dic)
+            )
+        )
 
 
-async def dynamodb_update(tablename, key_dic, changes_dic):
+async def dynamodb_update(tablename, key_dic, changes_dic, set_only=True):
+    if set_only:
+        changes_dic = {
+            upd_key: {"Value": upd_val}
+            for upd_key, upd_val in changes_dic.items()
+        }
+    ddb_changes_dic = {
+        change_key: py_to_ddb(change_val)
+        for change_key, change_val in changes_dic.items()
+    }
     async with aioboto3_session.client(
         "dynamodb", **aws_credentials
     ) as dynamodb_client:
         await dynamodb_client.update_item(
-            TableName=tablename, Key=key_dic, AttributeUpdates=changes_dic
+            TableName=tablename,
+            Key=py_to_ddb(key_dic),
+            AttributeUpdates=ddb_changes_dic,
         )
 
 
@@ -33,13 +48,17 @@ async def dynamodb_delete(tablename, key_dic):
     ) as dynamodb_client:
         return await dynamodb_client.delete_item(
             TableName=tablename,
-            Key=key_dic,
+            Key=py_to_ddb(key_dic),
             ReturnValues="ALL_OLD",
         )
 
 
 async def dynamodb_scan(
-    table_name, filter_expression=None, is_in_list=None, is_in_attr=""
+    table_name,
+    filter_expression=None,
+    is_in_list=None,
+    is_in_attr="",
+    ExpressionAttributeValues=None,
 ):
     if is_in_list != None:
         chunks = [
@@ -63,7 +82,9 @@ async def dynamodb_scan(
             response = await dynamodb_client.scan(TableName=table_name)
         else:
             response = await dynamodb_client.scan(
-                TableName=table_name, FilterExpression=filter_expression
+                TableName=table_name,
+                FilterExpression=filter_expression,
+                **{"ExpressionAttributeValues": ExpressionAttributeValues}
             )
         data_ret = response["Items"]
         while "LastEvaluatedKey" in response:
@@ -71,16 +92,18 @@ async def dynamodb_scan(
                 response = await dynamodb_client.scan(
                     TableName=table_name,
                     ExclusiveStartKey=response["LastEvaluatedKey"],
+                    **{"ExpressionAttributeValues": ExpressionAttributeValues}
                 )
             else:
                 response = await dynamodb_client.scan(
                     TableName=table_name,
                     ExclusiveStartKey=response["LastEvaluatedKey"],
                     FilterExpression=filter_expression,
+                    **{"ExpressionAttributeValues": ExpressionAttributeValues}
                 )
             data_ret.extend(response["Items"])
 
-        return data_ret
+        return [ddb_to_py(item) for item in data_ret]
 
 
 async def create_table(table_name, key_name, key_type):
@@ -136,3 +159,16 @@ async def s3_upload(im_path, bucket, relpath):
     async with aioboto3_session.client("s3", **aws_credentials) as s3_client:
         await s3_client.upload_file(im_path, bucket, relpath)
 
+
+boto3.resource("dynamodb", **aws_credentials)
+
+
+ddb_to_py = lambda ddb_data: {
+    k: boto3.dynamodb.types.TypeDeserializer().deserialize(v)
+    for k, v in ddb_data.items()
+}
+
+py_to_ddb = lambda py_data: {
+    k: boto3.dynamodb.types.TypeSerializer().serialize(v)
+    for k, v in py_data.items()
+}
