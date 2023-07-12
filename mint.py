@@ -349,6 +349,7 @@ async def make_mint_leos(
             {"request_id": request_id},
             {"mint_leos_output": mint_leos_output},
         )
+        return mint_leos_output
     except Exception as e:
         await dynamodb_update(
             env.ALEO_MINT_REQUESTS_TABLE,
