@@ -10,7 +10,14 @@ from burn import (
     handle_active_burn_request,
     burn_scan_records,
 )
-from aleo import get_height
+from aleo import (
+    get_height,
+    get_recent_transitions,
+    get_transaction_id,
+    get_transaction,
+)
+
+from aws_utils import dynamodb_get, dynamodb_update, dynamodb_scan
 
 import env
 import traceback
@@ -51,14 +58,21 @@ async def sync():
     try:
         cur_height = await get_height()
         await create_accounts_if_needed()
-        [mint_requests, burn_requests] = await asyncio.gather(
+        [
+            mint_requests,
+            burn_requests,
+            mint_transfer_transactions,
+        ] = await asyncio.gather(
             get_mint_requests(cur_height),
             get_burn_requests(cur_height),
+            get_recent_transfer_transactions_mint(cur_height),
         )
         await asyncio.gather(
             asyncio.gather(
                 *[
-                    mint_scan_records(request, cur_height)
+                    mint_scan_records(
+                        request, cur_height, mint_transfer_transactions
+                    )
                     for request in mint_requests
                 ],
             ),
@@ -72,7 +86,7 @@ async def sync():
         mint_requests = [
             mint_request
             for mint_request in mint_requests
-            if mint_request.get("scan_credits_output") is not None
+            if mint_request.get("scan_pp_output") is not None
         ]
         burn_requests = [
             burn_request
@@ -94,10 +108,110 @@ async def sync():
         print(traceback.format_exc())
 
 
+async def get_recent_transfer_transactions_mint(cur_height):
+    return await dynamodb_scan(
+        env.KNOWN_TRANSACTION_IDS_TABLE,
+        filter_expression="discovery_height >= :height_limit and attribute_not_exists(used_already)",
+        ExpressionAttributeValues={
+            ":height_limit": {
+                "N": str(cur_height - env.REQUESTS_SCAN_HEIGHT_LIMIT)
+            }
+        },
+    )
+
+
+async def sync_transition(transition_id, height):
+    transaction_id = await get_transaction_id(transition_id)
+    if not transaction_id:
+        await dynamodb_update(
+            env.KNOWN_TRANSITION_IDS_TABLE,
+            {"transition_id": transition_id},
+            {"known_already": True},
+        )
+        return
+    transaction = await get_transaction(transaction_id)
+    if not transaction:
+        return
+    transitions = transaction.get("execution").get("transitions")
+    if not transitions or transitions[0].get("function") != "transfer_private":
+        return await dynamodb_update(
+            env.KNOWN_TRANSITION_IDS_TABLE,
+            {"transition_id": transition_id},
+            {"known_already": True},
+        )
+    encrypted_record = transitions[0].get("outputs")[0].get("value")
+
+    await asyncio.gather(
+        dynamodb_update(
+            env.KNOWN_TRANSACTION_IDS_TABLE,
+            {"transaction_id": transaction_id},
+            {
+                "encrypted_record": encrypted_record,
+                "discovery_height": height,
+            },
+        ),
+        dynamodb_update(
+            env.KNOWN_TRANSITION_IDS_TABLE,
+            {"transition_id": transition_id},
+            {"known_already": True},
+        ),
+    )
+
+
+async def sync_transactions():
+    [transition_ids, cur_height] = await asyncio.gather(
+        get_recent_transitions(env.PRIVACY_PRIDE_PROGRAM_ID), get_height()
+    )
+    known_transitions = await asyncio.gather(
+        *[
+            dynamodb_get(
+                env.KNOWN_TRANSITION_IDS_TABLE,
+                {"transition_id": transition_id},
+            )
+            for transition_id in transition_ids
+        ],
+    )
+    unknown_transition_ids = [
+        transition_id
+        for [transition_id, known_transition] in zip(
+            transition_ids, known_transitions
+        )
+        if known_transition is None
+    ]
+
+    await asyncio.gather(
+        *[
+            sync_transition(transition_id, cur_height)
+            for transition_id in unknown_transition_ids
+        ]
+    )
+
+    await asyncio.gather(
+        *[
+            dynamodb_update(
+                env.KNOWN_TRANSITION_IDS_TABLE,
+                {"transition_id": transition_id},
+                {"known_already": True},
+            )
+            for transition_id in unknown_transition_ids
+        ],
+    )
+
+
 async def periodic():
+    await asyncio.gather(periodic_transactions(), periodic_sync())
+
+
+async def periodic_sync():
     while True:
         await sync()
-        await asyncio.sleep(env.TASK_PERIOD_S)
+        await asyncio.sleep(env.SYNC_TASK_PERIOD_S)
+
+
+async def periodic_transactions():
+    while True:
+        await sync_transactions()
+        await asyncio.sleep(env.TRANSACTIONS_TASK_PERIOD_S)
 
 
 if __name__ == "__main__":

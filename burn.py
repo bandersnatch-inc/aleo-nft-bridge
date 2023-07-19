@@ -30,6 +30,7 @@ async def get_burn_requests(cur_height):
 
 
 async def burn_scan_records(request, cur_height):
+    return None
     try:
         request_id = request["request_id"]
         creation_block_height = request["creation_block_height"]

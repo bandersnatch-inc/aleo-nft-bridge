@@ -7,6 +7,9 @@ import json
 from aws_utils import dynamodb_scan, dynamodb_delete, dynamodb_update
 import asyncio
 from project_utils import utc_now_ms, ascync_run, record_to_amount
+import json
+import re
+from fake_useragent import UserAgent
 
 
 async def create_account():
@@ -225,14 +228,20 @@ async def decrypt_record(record, view_key):
             view_key,
         ]
     )
+    record = "".join(stdout.split("\n")[1:-1]).replace(" ", "")
+    if not record.startswith("{"):
+        return ""
     return "".join(stdout.split("\n")[1:-1]).replace(" ", "")
 
 
 async def get_treasury_records():
     treasury_records = await dynamodb_scan(env.ALEO_TREASURY_RECORDS_TABLE)
     records = []
+    collection_record = None
 
     for record_scanned in treasury_records:
+        if record_scanned.get("collection_record"):
+            collection_record = record_scanned["record_id"]
         records.append(
             {
                 "record": record_scanned["record_id"],
@@ -242,6 +251,8 @@ async def get_treasury_records():
     records.sort(key=lambda x: x["amount"])
     if len(records) < 2:
         raise Exception("Not enough records in treasury.")
+    if not collection_record:
+        raise Exception("No collection record in treasury.")
 
     biggest_record, smallest_record = records[-1], records[0]
 
@@ -254,9 +265,17 @@ async def get_treasury_records():
             env.ALEO_TREASURY_RECORDS_TABLE,
             {"record_id": smallest_record["record"]},
         ),
+        dynamodb_delete(
+            env.ALEO_TREASURY_RECORDS_TABLE,
+            {"record_id": collection_record},
+        ),
     )
 
-    return smallest_record["record"], biggest_record["record"]
+    return (
+        smallest_record["record"],
+        biggest_record["record"],
+        collection_record,
+    )
 
 
 async def push_treasury_records(records):
@@ -265,9 +284,9 @@ async def push_treasury_records(records):
             dynamodb_update(
                 env.ALEO_TREASURY_RECORDS_TABLE,
                 {"record_id": record},
-                {"used_already": False},
+                {"used_already": False, "collection_record": collection},
             )
-            for record in records
+            for (record, collection) in records
         ]
     )
 
@@ -275,7 +294,6 @@ async def push_treasury_records(records):
 async def transfer_leos(
     private_key,
     amount_record,
-    amount,
     receiver_address,
     fee_record,
     priority_fee=0,
@@ -288,10 +306,9 @@ async def transfer_leos(
             f"{env.CARGO_BIN_DIR_PATH}snarkos",
             "developer",
             "execute",
-            env.ALEO_STORE_PROGRAM_ID,
-            "transfer_leos",
+            env.PRIVACY_PRIDE_PROGRAM_ID,
+            "transfer_private",
             amount_record,
-            amount,
             receiver_address,
             "--query",
             env.ALEO_API,
@@ -346,3 +363,101 @@ async def burn_leos(
     if not len(tx_id) == 61 or not tx_id.startswith("at1"):
         raise Exception(stdout)
     return tx_id
+
+
+async def get_transaction_id(transition_id):
+    return await get_request(
+        f"{env.ALEO_API}/testnet3/find/transactionID/{transition_id}",
+    )
+
+
+async def get_transaction(transaction_id):
+    return await get_request(
+        f"{env.ALEO_API}/testnet3/transaction/{transaction_id}",
+    )
+
+
+async def get_recent_transitions(program_id):
+    ua = UserAgent()
+    header = {"User-Agent": str(ua.chrome)}
+
+    res = await get_request(
+        f"{env.HAMP_API}/program?id={program_id}",
+        headers=header,
+        json_output=False,
+    )
+
+    transition_ids = re.findall(
+        r"\<a\ href\=\"\/transition\?id\=(as1[0-9a-z-A-Z]+)\"\>", res
+    )
+    return transition_ids
+
+
+async def mint_private(
+    private_key,
+    collection_record,
+    token_number,
+    user_address,
+    metadata_uri,
+    fee_record,
+    priority_fee=0,
+):
+    collection_record = f'"{collection_record}"'
+    fee_record = f'"{fee_record}"'
+    metadata_uri = f'"{metadata_uri}"'
+    stdout = await ascync_run(
+        [
+            f"{env.CARGO_BIN_DIR_PATH}snarkos",
+            "developer",
+            "execute",
+            env.ALEO_STORE_PROGRAM_ID,
+            "mint_private",
+            collection_record,
+            token_number,
+            user_address,
+            metadata_uri,
+            "--query",
+            env.ALEO_API,
+            "--private-key",
+            private_key,
+            "--broadcast",
+            env.ALEO_BROADCAST_ENDPOINT,
+            "--fee",
+            priority_fee,
+            "--record",
+            fee_record,
+        ]
+    )
+    tx_id = stdout.split("\n")[5]
+    if not len(tx_id) == 61 or not tx_id.startswith("at1"):
+        raise Exception(stdout)
+    return tx_id
+
+
+def encode_string(string, part_amount, bits_per_part):
+    part_len = bits_per_part // 8
+    print(part_len)
+    parts_str = []
+    if len(string) > part_amount * bits_per_part // 8:
+        raise Exception("String too long to be encoded.")
+    for i in range(part_amount):
+        parts_str.append(string[i * part_len : (i + 1) * part_len])
+    parts_hex = [
+        part_str.encode('utf-8').hex()
+        for part_str in parts_str
+    ]
+    parts_int = [
+        int(part_hex, 16) if part_hex else 0 for part_hex in parts_hex
+    ]
+    out_str = "{" + "".join(
+        [
+            f"part{i}:{parts_int[i]}u{bits_per_part},"
+            for i in range(part_amount)
+        ]
+    )
+    out_str = out_str[:-1] + "}"
+    return out_str
+
+
+def encode_string64(string):
+    return encode_string(string, 4, 128)
