@@ -21,6 +21,8 @@ async def ascync_run(cmd):
     stdout = stdout.decode()
     stderr = stderr.decode()
 
+    if "Invalid view key for the provided record ciphertext" in stdout:
+        return stdout
     print("")
     print("Executing:")
     print(colored(full_cmd, "blue"))
