@@ -15,11 +15,12 @@ async def dynamodb_get(tablename, key_dic):
     async with aioboto3_session.client(
         "dynamodb", **aws_credentials
     ) as dynamodb_client:
-        return ddb_to_py(
-            await dynamodb_client.get_item(
-                TableName=tablename, Key=py_to_ddb(key_dic)
-            )
+        ret = await dynamodb_client.get_item(
+            TableName=tablename, Key=py_to_ddb(key_dic)
         )
+        if "Item" not in ret:
+            return None
+        return ddb_to_py(ret["Item"])
 
 
 async def dynamodb_update(tablename, key_dic, changes_dic, set_only=True):
