@@ -4,7 +4,12 @@ import env
 from http_utils import get_request
 import json
 
-from aws_utils import dynamodb_scan, dynamodb_delete, dynamodb_update
+from aws_utils import (
+    dynamodb_scan,
+    dynamodb_delete,
+    dynamodb_update,
+    dynamodb_get,
+)
 import asyncio
 from project_utils import utc_now_ms, ascync_run, record_to_amount
 import json
@@ -88,9 +93,10 @@ async def transfer_credits(
             fee_record,
         ]
     )
-    tx_id = stdout.split("\n")[5]
-    if not len(tx_id) == 61 or not tx_id.startswith("at1"):
+    tx_ids = re.findall(r"at1[a-z0-9]{58}", stdout)
+    if not tx_ids:
         raise Exception(stdout)
+    tx_id = tx_ids[0]
     return tx_id
 
 
@@ -120,9 +126,10 @@ async def mint_leos(
             fee_record,
         ]
     )
-    tx_id = stdout.split("\n")[5]
-    if not len(tx_id) == 61 or not tx_id.startswith("at1"):
+    tx_ids = re.findall(r"at1[a-z0-9]{58}", stdout)
+    if not tx_ids:
         raise Exception(stdout)
+    tx_id = tx_ids[0]
     return tx_id
 
 
@@ -150,9 +157,10 @@ async def split_credit(
             env.ALEO_BROADCAST_ENDPOINT,
         ]
     )
-    tx_id = stdout.split("\n")[5]
-    if not len(tx_id) == 61 or not tx_id.startswith("at1"):
+    tx_ids = re.findall(r"at1[a-z0-9]{58}", stdout)
+    if not tx_ids:
         raise Exception(stdout)
+    tx_id = tx_ids[0]
     return tx_id
 
 
@@ -187,9 +195,10 @@ async def join_credits(
             fee_record,
         ]
     )
-    tx_id = stdout.split("\n")[5]
-    if not len(tx_id) == 61 or not tx_id.startswith("at1"):
+    tx_ids = re.findall(r"at1[a-z0-9]{58}", stdout)
+    if not tx_ids:
         raise Exception(stdout)
+    tx_id = tx_ids[0]
     return tx_id
 
 
@@ -242,6 +251,7 @@ async def get_treasury_records():
     for record_scanned in treasury_records:
         if record_scanned.get("collection_record"):
             collection_record = record_scanned["record_id"]
+            continue
         records.append(
             {
                 "record": record_scanned["record_id"],
@@ -278,6 +288,21 @@ async def get_treasury_records():
     )
 
 
+async def get_stored_token_record(token_number):
+    treasury_record = await dynamodb_get(
+        env.PRIVACY_PRIDE_STORED_TOKEN_RECORDS_TABLE,
+        {"token_number": token_number},
+    )
+    if not treasury_record:
+        raise Exception("No corresponding token record in treasury.")
+
+    await dynamodb_delete(
+        env.PRIVACY_PRIDE_STORED_TOKEN_RECORDS_TABLE,
+        {"token_number": token_number},
+    )
+    return treasury_record["token_record"]
+
+
 async def push_treasury_records(records):
     await asyncio.gather(
         *[
@@ -291,7 +316,7 @@ async def push_treasury_records(records):
     )
 
 
-async def transfer_leos(
+async def transfer_pp(
     private_key,
     amount_record,
     receiver_address,
@@ -300,7 +325,6 @@ async def transfer_leos(
 ):
     amount_record = f'"{amount_record}"'
     fee_record = f'"{fee_record}"'
-    amount = f"{amount}u64"
     stdout = await ascync_run(
         [
             f"{env.CARGO_BIN_DIR_PATH}snarkos",
@@ -322,31 +346,31 @@ async def transfer_leos(
             fee_record,
         ]
     )
-    tx_id = stdout.split("\n")[5]
-    if not len(tx_id) == 61 or not tx_id.startswith("at1"):
+    tx_ids = re.findall(r"at1[a-z0-9]{58}", stdout)
+    if not tx_ids:
         raise Exception(stdout)
+    tx_id = tx_ids[0]
     return tx_id
 
 
-async def burn_leos(
+async def transfer_token_private(
     private_key,
     amount_record,
-    amount,
+    receiver_address,
     fee_record,
     priority_fee=0,
 ):
     amount_record = f'"{amount_record}"'
     fee_record = f'"{fee_record}"'
-    amount = f"{amount}u64"
     stdout = await ascync_run(
         [
             f"{env.CARGO_BIN_DIR_PATH}snarkos",
             "developer",
             "execute",
             env.ALEO_STORE_PROGRAM_ID,
-            "burn_leos",
+            "transfer_token_private",
             amount_record,
-            amount,
+            receiver_address,
             "--query",
             env.ALEO_API,
             "--private-key",
@@ -359,9 +383,48 @@ async def burn_leos(
             fee_record,
         ]
     )
-    tx_id = stdout.split("\n")[5]
-    if not len(tx_id) == 61 or not tx_id.startswith("at1"):
+    tx_ids = re.findall(r"at1[a-z0-9]{58}", stdout)
+    if not tx_ids:
         raise Exception(stdout)
+    tx_id = tx_ids[0]
+    return tx_id
+
+
+async def burn_private(
+    private_key,
+    collection_record,
+    amount_record,
+    fee_record,
+    priority_fee=0,
+):
+    amount_record = f'"{amount_record}"'
+    collection_record = f'"{collection_record}"'
+    fee_record = f'"{fee_record}"'
+    stdout = await ascync_run(
+        [
+            f"{env.CARGO_BIN_DIR_PATH}snarkos",
+            "developer",
+            "execute",
+            env.ALEO_STORE_PROGRAM_ID,
+            "burn_private",
+            collection_record,
+            amount_record,
+            "--query",
+            env.ALEO_API,
+            "--private-key",
+            private_key,
+            "--broadcast",
+            env.ALEO_BROADCAST_ENDPOINT,
+            "--fee",
+            priority_fee,
+            "--record",
+            fee_record,
+        ]
+    )
+    tx_ids = re.findall(r"at1[a-z0-9]{58}", stdout)
+    if not tx_ids:
+        raise Exception(stdout)
+    tx_id = tx_ids[0]
     return tx_id
 
 
@@ -428,24 +491,21 @@ async def mint_private(
             fee_record,
         ]
     )
-    tx_id = stdout.split("\n")[5]
-    if not len(tx_id) == 61 or not tx_id.startswith("at1"):
+    tx_ids = re.findall(r"at1[a-z0-9]{58}", stdout)
+    if not tx_ids:
         raise Exception(stdout)
+    tx_id = tx_ids[0]
     return tx_id
 
 
 def encode_string(string, part_amount, bits_per_part):
     part_len = bits_per_part // 8
-    print(part_len)
     parts_str = []
     if len(string) > part_amount * bits_per_part // 8:
         raise Exception("String too long to be encoded.")
     for i in range(part_amount):
         parts_str.append(string[i * part_len : (i + 1) * part_len])
-    parts_hex = [
-        part_str.encode('utf-8').hex()
-        for part_str in parts_str
-    ]
+    parts_hex = [part_str.encode("utf-8").hex() for part_str in parts_str]
     parts_int = [
         int(part_hex, 16) if part_hex else 0 for part_hex in parts_hex
     ]

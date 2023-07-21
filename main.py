@@ -16,6 +16,7 @@ from aleo import (
     get_transaction_id,
     get_transaction,
 )
+import random
 
 from aws_utils import dynamodb_get, dynamodb_update, dynamodb_scan
 
@@ -62,10 +63,12 @@ async def sync():
             mint_requests,
             burn_requests,
             mint_transfer_transactions,
+            burn_transfer_transactions,
         ] = await asyncio.gather(
             get_mint_requests(cur_height),
             get_burn_requests(cur_height),
             get_recent_transfer_transactions_mint(cur_height),
+            get_recent_transfer_transactions_burn(cur_height),
         )
         await asyncio.gather(
             asyncio.gather(
@@ -78,7 +81,9 @@ async def sync():
             ),
             asyncio.gather(
                 *[
-                    burn_scan_records(request, cur_height)
+                    burn_scan_records(
+                        request, cur_height, burn_transfer_transactions
+                    )
                     for request in burn_requests
                 ],
             ),
@@ -91,7 +96,7 @@ async def sync():
         burn_requests = [
             burn_request
             for burn_request in burn_requests
-            if burn_request.get("scan_leos_output") is not None
+            if burn_request.get("scan_pp_output") is not None
         ]
         requests = merge_requests(burn_requests, mint_requests)
         for request in requests:
@@ -120,11 +125,34 @@ async def get_recent_transfer_transactions_mint(cur_height):
     )
 
 
-async def sync_transition(transition_id, height):
+async def get_recent_transfer_transactions_burn(cur_height):
+    return await dynamodb_scan(
+        env.KNOWN_BURN_TRANSACTION_IDS_TABLE,
+        filter_expression="discovery_height >= :height_limit and attribute_not_exists(used_already)",
+        ExpressionAttributeValues={
+            ":height_limit": {
+                "N": str(cur_height - env.REQUESTS_SCAN_HEIGHT_LIMIT)
+            }
+        },
+    )
+
+
+async def sync_transition(
+    transition_id,
+    height,
+    known_transaction_ids_table,
+    known_transition_ids_table,
+    program_id,
+):
+    function_name = (
+        "transfer_private"
+        if program_id == env.PRIVACY_PRIDE_PROGRAM_ID
+        else "transfer_token_private"
+    )
     transaction_id = await get_transaction_id(transition_id)
     if not transaction_id:
         await dynamodb_update(
-            env.KNOWN_TRANSITION_IDS_TABLE,
+            known_transition_ids_table,
             {"transition_id": transition_id},
             {"known_already": True},
         )
@@ -133,9 +161,9 @@ async def sync_transition(transition_id, height):
     if not transaction:
         return
     transitions = transaction.get("execution").get("transitions")
-    if not transitions or transitions[0].get("function") != "transfer_private":
+    if not transitions or transitions[0].get("function") != function_name:
         return await dynamodb_update(
-            env.KNOWN_TRANSITION_IDS_TABLE,
+            known_transition_ids_table,
             {"transition_id": transition_id},
             {"known_already": True},
         )
@@ -143,7 +171,7 @@ async def sync_transition(transition_id, height):
 
     await asyncio.gather(
         dynamodb_update(
-            env.KNOWN_TRANSACTION_IDS_TABLE,
+            known_transaction_ids_table,
             {"transaction_id": transaction_id},
             {
                 "encrypted_record": encrypted_record,
@@ -151,21 +179,25 @@ async def sync_transition(transition_id, height):
             },
         ),
         dynamodb_update(
-            env.KNOWN_TRANSITION_IDS_TABLE,
+            known_transition_ids_table,
             {"transition_id": transition_id},
             {"known_already": True},
         ),
     )
 
 
-async def sync_transactions():
+async def sync_transactions(
+    program_id,
+    known_transaction_ids_table,
+    known_transition_ids_table,
+):
     [transition_ids, cur_height] = await asyncio.gather(
-        get_recent_transitions(env.PRIVACY_PRIDE_PROGRAM_ID), get_height()
+        get_recent_transitions(program_id), get_height()
     )
     known_transitions = await asyncio.gather(
         *[
             dynamodb_get(
-                env.KNOWN_TRANSITION_IDS_TABLE,
+                known_transition_ids_table,
                 {"transition_id": transition_id},
             )
             for transition_id in transition_ids
@@ -181,7 +213,13 @@ async def sync_transactions():
 
     await asyncio.gather(
         *[
-            sync_transition(transition_id, cur_height)
+            sync_transition(
+                transition_id,
+                cur_height,
+                known_transaction_ids_table,
+                known_transition_ids_table,
+                program_id,
+            )
             for transition_id in unknown_transition_ids
         ]
     )
@@ -189,7 +227,7 @@ async def sync_transactions():
     await asyncio.gather(
         *[
             dynamodb_update(
-                env.KNOWN_TRANSITION_IDS_TABLE,
+                known_transition_ids_table,
                 {"transition_id": transition_id},
                 {"known_already": True},
             )
@@ -210,7 +248,17 @@ async def periodic_sync():
 
 async def periodic_transactions():
     while True:
-        await sync_transactions()
+        await sync_transactions(
+            env.PRIVACY_PRIDE_PROGRAM_ID,
+            env.KNOWN_TRANSACTION_IDS_TABLE,
+            env.KNOWN_TRANSITION_IDS_TABLE,
+        )
+        await asyncio.sleep(1 + random.random())
+        await sync_transactions(
+            env.ALEO_STORE_PROGRAM_ID,
+            env.KNOWN_BURN_TRANSACTION_IDS_TABLE,
+            env.KNOWN_BURN_TRANSITION_IDS_TABLE,
+        )
         await asyncio.sleep(env.TRANSACTIONS_TASK_PERIOD_S)
 
 

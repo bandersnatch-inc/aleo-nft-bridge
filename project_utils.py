@@ -3,6 +3,7 @@ import asyncio
 
 from termcolor import colored
 import traceback as tb
+import env
 
 utc_now_ms = lambda: round(datetime.utcnow().timestamp() * 1000)
 
@@ -66,3 +67,13 @@ def record_to_pp_data(record):
         "edition": edition,
         "token_number": token_number_str,
     }
+
+
+def record_to_as_data(record):
+    collection_number = int(record.split(",")[2][18:-13])
+    if collection_number != int(env.PRVIACY_PRIDE_COLLECTION_NUMBER):
+        raise Exception("Wrong collection")
+
+    token_number = record.split(",")[1][17:-8]
+
+    return {"token_number": token_number}

@@ -7,17 +7,12 @@ from aleo import (
     get_treasury_records,
     push_treasury_records,
     decrypt_record,
-    transfer_leos,
-    mint_private, 
-    encode_string64
+    transfer_pp,
+    mint_private,
+    encode_string64,
 )
 import env
 from project_utils import record_to_amount, format_error, record_to_pp_data
-
-
-MINT_TOTAL_FEE = (
-    env.MINT_LEOS_FEE + env.JOIN_CREDITS_FEE + env.TRANSFER_CREDITS_FEE
-)
 
 
 async def create_and_store_account():
@@ -87,8 +82,8 @@ async def handle_active_mint_request(request, cur_height):
     scan_transfer_credits_fees_output = request.get(
         "scan_transfer_credits_fees_output", None
     )
-    transfer_leos_output = request.get("transfer_leos_output", None)
-    scan_transfer_leos_output = request.get("scan_transfer_leos_output", None)
+    transfer_pp_output = request.get("transfer_pp_output", None)
+    scan_transfer_pp_output = request.get("scan_transfer_pp_output", None)
     mint_output = request.get("mint_output", None)
     scan_mint_output = request.get("scan_mint_output", None)
 
@@ -114,21 +109,21 @@ async def handle_active_mint_request(request, cur_height):
                 scan_transfer_credits_fees_output,
             )
         )
-        has_worked = not bool(transfer_leos_output)
-        transfer_leos_output = await make_transfer_leos(
+        has_worked = not bool(transfer_pp_output)
+        transfer_pp_output = await make_transfer_pp(
             request_id,
             recipient_private_key,
             scan_pp_output["received_record"],
             scan_transfer_credits_fees_output["transfer_output_record"],
-            transfer_leos_output,
+            transfer_pp_output,
         )
         if has_worked:
             await asyncio.sleep(15)
-        scan_transfer_leos_output = await make_scan_transfer_leos(
+        scan_transfer_pp_output = await make_scan_transfer_pp(
             request_id,
             scan_pp_output["pp_data"]["token_number"],
-            transfer_leos_output["tx_id"],
-            scan_transfer_leos_output,
+            transfer_pp_output["tx_id"],
+            scan_transfer_pp_output,
         )
         has_worked = not bool(mint_output)
         mint_output = await make_mint(
@@ -142,7 +137,7 @@ async def handle_active_mint_request(request, cur_height):
         if has_worked:
             await asyncio.sleep(15)
 
-        scan_mint_output = await make_scan_transfer(
+        scan_mint_output = await make_scan_mint(
             request_id,
             mint_output["tx_id"],
             scan_transfer_credits_fees_output["fee_output_record"],
@@ -228,14 +223,14 @@ async def make_scan_former(
             "collection_record": collection_record,
         }
         await dynamodb_update(
-            env.ALEO_BURN_REQUESTS_TABLE,
+            env.ALEO_MINT_REQUESTS_TABLE,
             {"request_id": request_id},
             {"scan_former_output": scan_former_output},
         )
         return scan_former_output
     except Exception as e:
         await dynamodb_update(
-            env.ALEO_BURN_REQUESTS_TABLE,
+            env.ALEO_MINT_REQUESTS_TABLE,
             {"request_id": request_id},
             {"scan_scan_former_error": format_error(e)},
         )
@@ -261,14 +256,14 @@ async def make_transfer_credits_fees(
         )
         transfer_credits_fees_output = {"tx_id": tx_id}
         await dynamodb_update(
-            env.ALEO_BURN_REQUESTS_TABLE,
+            env.ALEO_MINT_REQUESTS_TABLE,
             {"request_id": request_id},
             {"transfer_credits_fees_output": transfer_credits_fees_output},
         )
         return transfer_credits_fees_output
     except Exception as e:
         await dynamodb_update(
-            env.ALEO_BURN_REQUESTS_TABLE,
+            env.ALEO_MINT_REQUESTS_TABLE,
             {"request_id": request_id},
             {"transfer_credits_fees_error": format_error(e)},
         )
@@ -305,7 +300,7 @@ async def make_scan_transfer_credits_fees(
             ][1],
         }
         await dynamodb_update(
-            env.ALEO_BURN_REQUESTS_TABLE,
+            env.ALEO_MINT_REQUESTS_TABLE,
             {"request_id": request_id},
             {
                 "scan_transfer_credits_fees_output": scan_transfer_credits_fees_output
@@ -314,82 +309,82 @@ async def make_scan_transfer_credits_fees(
         return scan_transfer_credits_fees_output
     except Exception as e:
         await dynamodb_update(
-            env.ALEO_BURN_REQUESTS_TABLE,
+            env.ALEO_MINT_REQUESTS_TABLE,
             {"request_id": request_id},
             {"scan_transfer_credits_fees_error": format_error(e)},
         )
         raise e
 
 
-async def make_transfer_leos(
+async def make_transfer_pp(
     request_id,
     recipient_private_key,
     leo_record,
     fee_record,
-    transfer_leos_output,
+    transfer_pp_output,
 ):
-    if transfer_leos_output:
-        return transfer_leos_output
+    if transfer_pp_output:
+        return transfer_pp_output
     try:
-        tx_id = await transfer_leos(
+        tx_id = await transfer_pp(
             recipient_private_key,
             leo_record,
             env.MINT_ACCOUNT_ADDRESS,
             fee_record,
         )
-        transfer_leos_output = {"tx_id": tx_id}
+        transfer_pp_output = {"tx_id": tx_id}
         await dynamodb_update(
-            env.ALEO_BURN_REQUESTS_TABLE,
+            env.ALEO_MINT_REQUESTS_TABLE,
             {"request_id": request_id},
-            {"transfer_leos_output": transfer_leos_output},
+            {"transfer_pp_output": transfer_pp_output},
         )
-        return transfer_leos_output
+        return transfer_pp_output
     except Exception as e:
         await dynamodb_update(
-            env.ALEO_BURN_REQUESTS_TABLE,
+            env.ALEO_MINT_REQUESTS_TABLE,
             {"request_id": request_id},
-            {"transfer_leos_error": format_error(e)},
+            {"transfer_pp_error": format_error(e)},
         )
         raise e
 
 
-async def make_scan_transfer_leos(
+async def make_scan_transfer_pp(
     request_id,
     token_number,
     transaction_id,
-    scan_transfer_leos_output,
+    scan_transfer_pp_output,
 ):
-    if scan_transfer_leos_output:
-        return scan_transfer_leos_output
+    if scan_transfer_pp_output:
+        return scan_transfer_pp_output
     try:
         all_records = await get_transaction_outputs(
             transaction_id,
             env.MINT_ACCOUNT_VIEW_KEY,
         )
 
-        scan_transfer_leos_output = {
-            "leos_record": all_records[
+        scan_transfer_pp_output = {
+            "pp_record": all_records[
                 f"{env.PRIVACY_PRIDE_PROGRAM_ID}/transfer_private"
             ][0],
         }
         await asyncio.gather(
             dynamodb_update(
-                env.ALEO_BURN_REQUESTS_TABLE,
+                env.ALEO_MINT_REQUESTS_TABLE,
                 {"request_id": request_id},
-                {"scan_transfer_leos_output": scan_transfer_leos_output},
+                {"scan_transfer_pp_output": scan_transfer_pp_output},
             ),
             dynamodb_update(
                 env.PRIVACY_PRIDE_STORED_TOKEN_RECORDS_TABLE,
-                {"token_number": request_id},
-                {"token_record": scan_transfer_leos_output["leos_record"]},
+                {"token_number": token_number},
+                {"token_record": scan_transfer_pp_output["pp_record"]},
             ),
         )
-        return scan_transfer_leos_output
+        return scan_transfer_pp_output
     except Exception as e:
         await dynamodb_update(
-            env.ALEO_BURN_REQUESTS_TABLE,
+            env.ALEO_MINT_REQUESTS_TABLE,
             {"request_id": request_id},
-            {"scan_transfer_leos_error": format_error(e)},
+            {"scan_transfer_pp_error": format_error(e)},
         )
         raise e
 
@@ -410,26 +405,26 @@ async def make_mint(
             collection_record,
             pp_data["token_number"],
             user_address,
-            encode_string64(pp_data["token_id"] + ".json"),
+            encode_string64(str(pp_data["token_id"]) + ".json"),
             fee_record,
         )
         mint_output = {"tx_id": tx_id}
         await dynamodb_update(
-            env.ALEO_BURN_REQUESTS_TABLE,
+            env.ALEO_MINT_REQUESTS_TABLE,
             {"request_id": request_id},
             {"mint_output": mint_output},
         )
         return mint_output
     except Exception as e:
         await dynamodb_update(
-            env.ALEO_BURN_REQUESTS_TABLE,
+            env.ALEO_MINT_REQUESTS_TABLE,
             {"request_id": request_id},
             {"mint_error": format_error(e)},
         )
         raise e
 
 
-async def make_scan_transfer(
+async def make_scan_mint(
     request_id,
     transaction_id,
     to_store_record,
@@ -455,7 +450,7 @@ async def make_scan_transfer(
 
         await asyncio.gather(
             dynamodb_update(
-                env.ALEO_BURN_REQUESTS_TABLE,
+                env.ALEO_MINT_REQUESTS_TABLE,
                 {"request_id": request_id},
                 {"scan_mint_output": scan_mint_output},
             ),
@@ -470,7 +465,7 @@ async def make_scan_transfer(
         return scan_mint_output
     except Exception as e:
         await dynamodb_update(
-            env.ALEO_BURN_REQUESTS_TABLE,
+            env.ALEO_MINT_REQUESTS_TABLE,
             {"request_id": request_id},
             {"scan_mint_error": format_error(e)},
         )
