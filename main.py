@@ -308,7 +308,7 @@ async def sync_transition(transaction_id, transition, height):
         return
     encrypted_record = outputs[0].get("value")
 
-    dynamodb_update(
+    await dynamodb_update(
         known_transaction_ids_table,
         {"transaction_id": transaction_id},
         {
