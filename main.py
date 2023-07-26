@@ -226,7 +226,7 @@ async def sync_transactions():
             env.KNOWN_BLOCKS_TABLE,
             {"block_height": 0},
         )
-    ).block_height_value
+    )["block_height_value"]
 
     new_last_known_block = last_known_block
 
