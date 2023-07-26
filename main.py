@@ -15,6 +15,7 @@ from aleo import (
     get_recent_transitions,
     get_transaction_id,
     get_transaction,
+    get_block_transactions,
 )
 import random
 
@@ -191,9 +192,9 @@ async def sync_transactions(
     known_transaction_ids_table,
     known_transition_ids_table,
 ):
-    [transition_ids, cur_height] = await asyncio.gather(
-        get_recent_transitions(program_id), get_height()
-    )
+    cur_height = await get_height()
+    transition_ids = await get_recent_transitions(program_id)
+
     known_transitions = await asyncio.gather(
         *[
             dynamodb_get(
@@ -242,24 +243,109 @@ async def periodic():
 
 async def periodic_sync():
     while True:
-        await sync()
+        try:
+            await sync()
+        except Exception as e:
+            print(format_error(e))
         await asyncio.sleep(env.SYNC_TASK_PERIOD_S)
 
 
 async def periodic_transactions():
     while True:
-        await sync_transactions(
-            env.PRIVACY_PRIDE_PROGRAM_ID,
-            env.KNOWN_TRANSACTION_IDS_TABLE,
-            env.KNOWN_TRANSITION_IDS_TABLE,
-        )
-        await asyncio.sleep(1 + random.random())
-        await sync_transactions(
-            env.ALEO_STORE_PROGRAM_ID,
-            env.KNOWN_BURN_TRANSACTION_IDS_TABLE,
-            env.KNOWN_BURN_TRANSITION_IDS_TABLE,
-        )
+        try:
+            await sync_transactions()
+        except Exception as e:
+            print(format_error(e))
         await asyncio.sleep(env.TRANSACTIONS_TASK_PERIOD_S)
+
+
+async def sync_block(height):
+    transactions = await get_block_transactions(height)
+    to_execute = []
+    for transaction in transactions:
+        if (
+            transaction.get("status") != "accepted"
+            or transaction.get("type") != "execute"
+        ):
+            continue
+        transaction = transaction.get("transaction")
+        if not transaction or transaction.get("type") != "execute":
+            continue
+        transaction_id = transaction.get("id")
+
+        execution = transaction.get("execution")
+        if not execution:
+            continue
+
+        transitions = execution.get("transitions")
+        if not transitions:
+            continue
+
+        to_execute += [
+            sync_transition(transaction_id, transition, height)
+            for transition in transitions
+        ]
+
+    await asyncio.gather(*to_execute)
+
+
+async def sync_transition(transaction_id, transition, height):
+    program_id = transition.get("program")
+    if program_id == env.PRIVACY_PRIDE_PROGRAM_ID:
+        known_transaction_ids_table = env.KNOWN_TRANSACTION_IDS_TABLE
+        function_name = "transfer_private"
+    elif program_id == env.ALEO_STORE_PROGRAM_ID:
+        known_transaction_ids_table = env.KNOWN_BURN_TRANSACTION_IDS_TABLE
+        function_name = "transfer_token_private"
+    else:
+        return
+
+    if function_name != transition.get("function"):
+        return
+
+    outputs = transition.get("outputs")
+    if not outputs:
+        return
+    encrypted_record = outputs[0].get("value")
+
+    dynamodb_update(
+        known_transaction_ids_table,
+        {"transaction_id": transaction_id},
+        {
+            "encrypted_record": encrypted_record,
+            "discovery_height": height,
+        },
+    )
+
+
+async def sync_transactions():
+    cur_height = await get_height()
+    last_known_block = (
+        await dynamodb_get(
+            env.KNOWN_BLOCKS_TABLE,
+            {"block_height": 0},
+        )
+    ).block_height_value
+
+    new_last_known_block = last_known_block
+
+    while new_last_known_block <= cur_height:
+        try:
+            new_last_known_block += 1
+            if new_last_known_block in env.BLOCKS_TO_IGNORE.split(","):
+                continue
+            await sync_block(new_last_known_block)
+        except Exception as e:
+            new_last_known_block -= 1
+            print(format_error(e))
+            break
+
+    if new_last_known_block != last_known_block:
+        await dynamodb_update(
+            env.KNOWN_BLOCKS_TABLE,
+            {"block_height": 0},
+            {"block_height_value": new_last_known_block},
+        )
 
 
 if __name__ == "__main__":

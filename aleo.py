@@ -35,6 +35,12 @@ async def get_height():
     return int(await get_request(height_endpoint))
 
 
+async def get_block_transactions(height):
+    endpoint = f"{env.ALEO_API}/testnet3/block/{height}/transactions"
+    return await get_request(endpoint)
+
+
+
 async def scan_records(
     view_key, endpoint=env.ALEO_API, start=0, end=None, last=None
 ):
