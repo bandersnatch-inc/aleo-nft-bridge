@@ -416,6 +416,7 @@ async def get_recent_transitions(program_id):
         headers=header,
         json_output=False,
     )
+    print(res)
 
     transition_ids = re.findall(
         r"\<a\ href\=\"\/transition\?id\=(as1[0-9a-z-A-Z]+)\"\>", res
