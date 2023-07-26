@@ -100,39 +100,6 @@ async def transfer_credits(
     return tx_id
 
 
-async def mint_leos(
-    private_key, receiver_address, amount, fee_record, priority_fee=0
-):
-    amount = f"{amount}u64"
-    fee_record = f'"{fee_record}"'
-    stdout = await ascync_run(
-        [
-            f"{env.CARGO_BIN_DIR_PATH}snarkos",
-            "developer",
-            "execute",
-            env.ALEO_STORE_PROGRAM_ID,
-            "mint_leos",
-            amount,
-            receiver_address,
-            "--query",
-            env.ALEO_API,
-            "--private-key",
-            private_key,
-            "--broadcast",
-            env.ALEO_BROADCAST_ENDPOINT,
-            "--fee",
-            priority_fee,
-            "--record",
-            fee_record,
-        ]
-    )
-    tx_ids = re.findall(r"at1[a-z0-9]{58}", stdout)
-    if not tx_ids:
-        raise Exception(stdout)
-    tx_id = tx_ids[0]
-    return tx_id
-
-
 async def split_credit(
     private_key,
     record,
@@ -467,7 +434,7 @@ async def mint_private(
 ):
     collection_record = f'"{collection_record}"'
     fee_record = f'"{fee_record}"'
-    metadata_uri = f'"{metadata_uri}"'
+    metadata_uri = '"{metadata_uri:' + metadata_uri + ',transferable:true}"'
     stdout = await ascync_run(
         [
             f"{env.CARGO_BIN_DIR_PATH}snarkos",
